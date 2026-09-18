@@ -276,7 +276,8 @@
         </select>
       </div>
     </div>
-    <button class="add-btn" onclick="addEntry()">Add transaction</button>
+    <button class="add-btn" id="submitBtn" onclick="addEntry()">Add transaction</button>
+    <button class="add-btn" id="cancelBtn" style="display:none;background:var(--paper-alt);color:var(--ink);margin-top:8px;" onclick="cancelEdit()">Cancel edit</button>
   </div>
 
   <div class="panel" id="breakdownPanel" style="display:none;">
@@ -305,6 +306,7 @@
 let entries = [];
 let currentType = 'expense';
 let viewDate = new Date();
+let editingId = null;
 const STORAGE_KEY = 'ledger:entries';
 
 function setType(t){
@@ -324,11 +326,11 @@ function monthKey(d){
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
 }
 
-async function loadEntries(){
+function loadEntries(){
   const statusEl = document.getElementById('status');
   try{
-    const result = await window.storage.get(STORAGE_KEY, false);
-    entries = result && result.value ? JSON.parse(result.value) : [];
+    const raw = localStorage.getItem(STORAGE_KEY);
+    entries = raw ? JSON.parse(raw) : [];
     statusEl.textContent = 'saved on this device';
   }catch(e){
     entries = [];
@@ -340,11 +342,12 @@ async function loadEntries(){
   render();
 }
 
-async function saveEntries(){
+function saveEntries(){
   try{
-    await window.storage.set(STORAGE_KEY, JSON.stringify(entries), false);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    document.getElementById('status').textContent = 'saved on this device';
   }catch(e){
-    document.getElementById('status').textContent = 'could not save — check connection';
+    document.getElementById('status').textContent = 'could not save on this device';
   }
 }
 
@@ -359,19 +362,54 @@ function addEntry(){
     return;
   }
 
-  entries.push({
-    id: Date.now(),
-    desc, amount, category, date,
-    type: currentType
-  });
+  if(editingId !== null){
+    const idx = entries.findIndex(e => e.id === editingId);
+    if(idx !== -1){
+      entries[idx] = { ...entries[idx], desc, amount, category, date, type: currentType };
+    }
+    cancelEdit();
+  } else {
+    entries.push({
+      id: Date.now(),
+      desc, amount, category, date,
+      type: currentType
+    });
+    document.getElementById('desc').value = '';
+    document.getElementById('amount').value = '';
+  }
 
-  document.getElementById('desc').value = '';
-  document.getElementById('amount').value = '';
   saveEntries();
   render();
 }
 
+function editEntry(id){
+  const entry = entries.find(e => e.id === id);
+  if(!entry) return;
+
+  editingId = id;
+  setType(entry.type);
+  document.getElementById('desc').value = entry.desc;
+  document.getElementById('amount').value = entry.amount;
+  document.getElementById('date').value = entry.date;
+  if(entry.type === 'expense'){
+    document.getElementById('category').value = entry.category;
+  }
+  document.getElementById('submitBtn').textContent = 'Save changes';
+  document.getElementById('cancelBtn').style.display = 'block';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function cancelEdit(){
+  editingId = null;
+  document.getElementById('desc').value = '';
+  document.getElementById('amount').value = '';
+  document.getElementById('date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('submitBtn').textContent = 'Add transaction';
+  document.getElementById('cancelBtn').style.display = 'none';
+}
+
 function deleteEntry(id){
+  if(editingId === id) cancelEdit();
   entries = entries.filter(e => e.id !== id);
   saveEntries();
   render();
@@ -407,7 +445,10 @@ function render(){
       <td>${escapeHtml(e.desc)}</td>
       <td><span class="cat-tag">${escapeHtml(e.category)}</span></td>
       <td class="amount ${e.type}">${sign} K ${e.amount.toFixed(2)}</td>
-      <td><button class="del" onclick="deleteEntry(${e.id})">remove</button></td>
+      <td>
+        <button class="del" onclick="editEntry(${e.id})">edit</button>
+        <button class="del" onclick="deleteEntry(${e.id})">remove</button>
+      </td>
     `;
     tbody.appendChild(tr);
   });
